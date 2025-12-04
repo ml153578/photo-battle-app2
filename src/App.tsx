@@ -66,7 +66,11 @@ function App() {
             setGameState('judging');
             if (isHost) {
               console.log('Host is triggering judging...');
-              await triggerJudging();
+              try {
+                await triggerJudging();
+              } catch (err) {
+                console.error('Error in triggerJudging from useEffect:', err);
+              }
             } else {
               console.log('Not host, skipping judging trigger');
             }
@@ -257,10 +261,31 @@ function App() {
   };
 
   const triggerJudging = async () => {
-    if (!lobbyId || !currentTopic) return;
+    if (!lobbyId) {
+      console.error('No lobbyId available');
+      return;
+    }
 
     try {
       console.log('Starting judging process...');
+
+      let topic = currentTopic;
+      if (!topic) {
+        console.log('Topic not in state, fetching from database...');
+        const { data: lobby } = await supabase
+          .from('lobbies')
+          .select('current_topic')
+          .eq('id', lobbyId)
+          .single();
+
+        topic = lobby?.current_topic;
+        if (!topic) {
+          console.error('No topic found in database');
+          setError('No topic found for judging');
+          return;
+        }
+        setCurrentTopic(topic);
+      }
 
       const { data: players } = await supabase
         .from('players')
@@ -281,8 +306,15 @@ function App() {
       }));
 
       const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!geminiApiKey) {
+        console.error('Gemini API key not found in environment variables');
+        setError('Gemini API key not configured');
+        return;
+      }
+
       console.log('Gemini API Key available:', !!geminiApiKey);
       console.log('Calling edge function with submissions:', submissions);
+      console.log('Topic:', topic);
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/judge-photos`,
@@ -293,7 +325,7 @@ function App() {
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           },
           body: JSON.stringify({
-            topic: currentTopic,
+            topic: topic,
             submissions,
             geminiApiKey,
           }),
@@ -330,7 +362,7 @@ function App() {
       await supabase.from('rounds').insert({
         lobby_id: lobbyId,
         round_number: lobby?.current_round || 1,
-        topic: currentTopic,
+        topic: topic,
         rankings_json: rankingsWithImages,
       });
 
@@ -504,3 +536,4 @@ function App() {
 }
 
 export default App;
+
